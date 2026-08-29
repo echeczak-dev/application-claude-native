@@ -1,4 +1,5 @@
 import UIKit
+import WebKit
 import Capacitor
 
 // Custom ViewController that forces the WKWebView to extend behind the
@@ -6,6 +7,29 @@ import Capacitor
 // keeps its own status-bar/home-indicator overrides (declared non-open),
 // so we act on the webView + safeAreaInsets instead.
 class MainViewController: CAPBridgeViewController {
+
+    // Inject at documentStart so the CSS rules kill the Safari-only
+    // fullscreen video hack + notif button BEFORE the PWA renders them.
+    // Kept in Swift so the native wrapper is independent of the PWA deploy state.
+    override func webViewConfiguration(for instanceConfiguration: InstanceConfiguration) -> WKWebViewConfiguration {
+        let config = super.webViewConfiguration(for: instanceConfiguration)
+        // JS injects a style tag + a class on <html>. The style hides the Safari
+        // fullscreen hack (fsBtn, fsVideo) + notif button, and makes #img cover
+        // the entire physical viewport (which now goes edge-to-edge thanks to
+        // negative safeAreaInsets in viewSafeAreaInsetsDidChange).
+        let js = "(function(){"
+            + "document.documentElement.classList.add('native-app');"
+            + "var s=document.createElement('style');"
+            + "s.setAttribute('data-native-override','1');"
+            + "s.textContent='html.native-app #fsBtn,html.native-app #fsVideo,html.native-app #notifBtn{display:none !important;}"
+            + "html.native-app,html.native-app body{background:#000 !important;overflow:hidden !important;}"
+            + "html.native-app #img{object-fit:cover !important;object-position:center center !important;}';"
+            + "(document.head||document.documentElement).appendChild(s);"
+            + "})();"
+        let userScript = WKUserScript(source: js, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        config.userContentController.addUserScript(userScript)
+        return config
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
