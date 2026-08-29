@@ -1,30 +1,16 @@
 import UIKit
 import Capacitor
 
-// Custom ViewController that forces TRUE fullscreen on iOS.
-// - Hides status bar entirely
-// - Hides home indicator (auto-hides after 3s inactivity)
-// - Sets WKWebView to ignore safe areas → draws behind notch + home indicator
-// - Sets background to black to match PWA
+// Custom ViewController that forces the WKWebView to extend behind the
+// physical screen edges (notch + home indicator). CAPBridgeViewController
+// keeps its own status-bar/home-indicator overrides (declared non-open),
+// so we act on the webView + safeAreaInsets instead.
 class MainViewController: CAPBridgeViewController {
-
-    override var prefersStatusBarHidden: Bool {
-        return true
-    }
-
-    override var prefersHomeIndicatorAutoHidden: Bool {
-        return true
-    }
-
-    override var preferredScreenEdgesDeferringSystemGestures: UIRectEdge {
-        return .all
-    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
 
-        // Force WKWebView to extend behind safe areas (notch + home indicator)
         if let webView = self.webView {
             webView.backgroundColor = .black
             webView.isOpaque = true
@@ -40,7 +26,8 @@ class MainViewController: CAPBridgeViewController {
 
     override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
-        // Ignore all safe area insets: WKWebView fills the physical screen
+        // Cancel all safe-area padding: web content fills the physical screen
+        // (notch + home indicator drawn on top of the webview).
         additionalSafeAreaInsets = UIEdgeInsets(
             top: -view.safeAreaInsets.top,
             left: -view.safeAreaInsets.left,
