@@ -1,0 +1,58 @@
+name: Build iOS Unsigned IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install deps
+        run: npm ci --no-audit --no-fund
+
+      - name: Capacitor sync
+        run: npx cap sync ios
+
+      - name: Resolve Swift Package deps
+        working-directory: ios/App
+        run: |
+          xcodebuild -resolvePackageDependencies -project App.xcodeproj -scheme App
+
+      - name: Build unsigned archive
+        working-directory: ios/App
+        run: |
+          xcodebuild \
+            -project App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -archivePath $PWD/build/App.xcarchive \
+            -destination "generic/platform=iOS" \
+            -sdk iphoneos \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            archive
+
+      - name: Package unsigned .ipa
+        working-directory: ios/App
+        run: |
+          mkdir -p Payload
+          cp -R build/App.xcarchive/Products/Applications/App.app Payload/
+          zip -qr ApplicationClaude-unsigned.ipa Payload
+          ls -lh ApplicationClaude-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ApplicationClaude-unsigned-ipa
+          path: ios/App/ApplicationClaude-unsigned.ipa
+          retention-days: 30

@@ -1,0 +1,17 @@
+{
+  "appId": "app.claude.applicationclaude",
+  "appName": "Application Claude",
+  "webDir": "www",
+  "server": {
+    "url": "https://rococo-fairy-07c1b2.netlify.app",
+    "cleartext": false,
+    "iosScheme": "https"
+  },
+  "ios": {
+    "contentInset": "always",
+    "scrollEnabled": false,
+    "allowsLinkPreview": false,
+    "handleApplicationNotifications": true,
+    "backgroundColor": "#000000"
+  }
+}
