@@ -35,4 +35,15 @@ class MainViewController: CAPBridgeViewController {
             right: -view.safeAreaInsets.right
         )
     }
+
+    // Auto-dim the home indicator bar after brief inactivity.
+    override var prefersHomeIndicatorAutoHidden: Bool {
+        return true
+    }
+
+    // Defer the bottom edge swipe so a first swipe just wakes UI instead of
+    // dismissing the app — the physical bar becomes practically invisible.
+    override var preferredScreenEdgesDeferringSystemGestures: UIRectEdge {
+        return [.bottom, .top]
+    }
 }
