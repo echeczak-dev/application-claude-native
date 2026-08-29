@@ -1,9 +1,73 @@
 <!doctype html>
-<html><head>
+<html lang="fr">
+<head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>Application Claude</title>
-<style>html,body{margin:0;padding:0;height:100%;background:#000;overflow:hidden}</style>
-</head><body>
-<script>location.replace('https://rococo-fairy-07c1b2.netlify.app/');</script>
-</body></html>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: #000;
+    overflow: hidden;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    overscroll-behavior: none;
+  }
+  #img {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    object-fit: cover;
+    object-position: center center;
+    display: block;
+    background: #000;
+    z-index: 0;
+  }
+</style>
+</head>
+<body>
+<img id="img" alt="">
+<script>
+  var CONFIG_URL = "https://rococo-fairy-07c1b2.netlify.app/api/config";
+  var imgEl = document.getElementById('img');
+  var lastSrc = null;
+
+  async function refresh() {
+    try {
+      var r = await fetch(CONFIG_URL + '?t=' + Date.now(), { cache: 'no-store' });
+      if (!r.ok) return;
+      var cfg = await r.json();
+      var url = (cfg.image_url || '').trim();
+      if (!url) return;
+      if (!/^(https?:|data:)/.test(url)) {
+        url = new URL(url, 'https://rococo-fairy-07c1b2.netlify.app/').href;
+      }
+      if (url !== lastSrc) {
+        imgEl.src = url;
+        lastSrc = url;
+      }
+    } catch (_) {}
+  }
+
+  refresh();
+  setInterval(refresh, 5000);
+
+  // Hide status bar + home indicator via Capacitor SystemBars plugin.
+  function tryHideBars() {
+    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SystemBars) {
+      try { window.Capacitor.Plugins.SystemBars.hide({}); } catch (_) {}
+      return;
+    }
+    setTimeout(tryHideBars, 100);
+  }
+  tryHideBars();
+</script>
+</body>
+</html>
