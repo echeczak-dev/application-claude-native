@@ -25,6 +25,12 @@ class MainViewController: CAPBridgeViewController {
             + "html.native-app,html.native-app body{background:#000 !important;overflow:hidden !important;}"
             + "html.native-app #img{object-fit:cover !important;object-position:center center !important;}';"
             + "(document.head||document.documentElement).appendChild(s);"
+            + "function tryHideBars(){"
+            + "  if(window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.SystemBars){"
+            + "    try{window.Capacitor.Plugins.SystemBars.hide({});}catch(e){}"
+            + "  }else{setTimeout(tryHideBars,50);}"
+            + "}"
+            + "tryHideBars();"
             + "})();"
         let userScript = WKUserScript(source: js, injectionTime: .atDocumentStart, forMainFrameOnly: true)
         config.userContentController.addUserScript(userScript)
@@ -60,13 +66,11 @@ class MainViewController: CAPBridgeViewController {
         )
     }
 
-    // Auto-dim the home indicator bar after brief inactivity.
-    override var prefersHomeIndicatorAutoHidden: Bool {
-        return true
-    }
-
-    // Defer the bottom edge swipe so a first swipe just wakes UI instead of
-    // dismissing the app — the physical bar becomes practically invisible.
+    // Defer bottom + top edge swipes so a first swipe only wakes UI instead of
+    // triggering system gestures (home indicator swipe / notif center).
+    // (prefersHomeIndicatorAutoHidden is handled via the SystemBars plugin JS
+    // call in the WKUserScript above — Capacitor declares it non-open in its
+    // SystemBars extension so we can't override it in Swift.)
     override var preferredScreenEdgesDeferringSystemGestures: UIRectEdge {
         return [.bottom, .top]
     }
