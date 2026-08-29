@@ -35,29 +35,25 @@
 <body>
 <img id="img" alt="">
 <script>
-  var CONFIG_URL = "https://rococo-fairy-07c1b2.netlify.app/api/config";
   var imgEl = document.getElementById('img');
-  var lastSrc = null;
 
+  /* VARIANT:IMAGE:START */
+  var CONFIG_URL = "https://rococo-fairy-07c1b2.netlify.app/api/config";
+  var lastSrc = null;
   async function refresh() {
     try {
-      var r = await fetch(CONFIG_URL + '?t=' + Date.now(), { cache: 'no-store' });
+      var r = await fetch(CONFIG_URL + '?t=' + Date.now(), {cache:'no-store'});
       if (!r.ok) return;
       var cfg = await r.json();
       var url = (cfg.image_url || '').trim();
       if (!url) return;
-      if (!/^(https?:|data:)/.test(url)) {
-        url = new URL(url, 'https://rococo-fairy-07c1b2.netlify.app/').href;
-      }
-      if (url !== lastSrc) {
-        imgEl.src = url;
-        lastSrc = url;
-      }
+      if (!/^(https?:|data:)/.test(url)) url = new URL(url, "https://rococo-fairy-07c1b2.netlify.app/api/config").href;
+      if (url !== lastSrc) { imgEl.src = url; lastSrc = url; }
     } catch (_) {}
   }
-
   refresh();
   setInterval(refresh, 5000);
+  /* VARIANT:IMAGE:END */
 
   // Hide status bar + home indicator via Capacitor SystemBars plugin.
   function tryHideBars() {

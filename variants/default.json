@@ -1,0 +1,6 @@
+{
+  "id": "default",
+  "appName": "Application Claude",
+  "appIdSuffix": "",
+  "config_url": "https://rococo-fairy-07c1b2.netlify.app/api/config"
+}

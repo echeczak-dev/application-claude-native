@@ -1,0 +1,98 @@
+name: Build iOS Variants
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      variants: ${{ steps.list.outputs.variants }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        run: |
+          if compgen -G "variants/*.json" > /dev/null; then
+            ids=$(ls variants/*.json | xargs -n1 basename | sed 's/\.json$//' | jq -R . | jq -sc .)
+          else
+            ids='["default"]'
+          fi
+          echo "variants=$ids" >> $GITHUB_OUTPUT
+          echo "Discovered variants: $ids"
+
+  build:
+    needs: discover
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJson(needs.discover.outputs.variants) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Pillow
+        run: pip install -r scripts/requirements.txt
+
+      - name: Install deps
+        run: npm ci --no-audit --no-fund
+
+      - name: Apply variant "${{ matrix.variant }}"
+        run: python scripts/apply_variant.py "variants/${{ matrix.variant }}.json"
+
+      - name: Capacitor sync
+        run: npx cap sync ios
+
+      - name: Resolve Swift Package deps
+        working-directory: ios/App
+        run: xcodebuild -resolvePackageDependencies -project App.xcodeproj -scheme App
+
+      - name: Build unsigned archive
+        working-directory: ios/App
+        run: |
+          xcodebuild \
+            -project App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -archivePath $PWD/build/App.xcarchive \
+            -destination "generic/platform=iOS" \
+            -sdk iphoneos \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            archive
+
+      - name: Package unsigned .ipa
+        working-directory: ios/App
+        run: |
+          mkdir -p Payload
+          cp -R build/App.xcarchive/Products/Applications/App.app Payload/
+          zip -qr "variant-${{ matrix.variant }}.ipa" Payload
+          ls -lh "variant-${{ matrix.variant }}.ipa"
+
+      - name: Extract variant metadata
+        id: meta
+        run: |
+          BUNDLE_ID=$(python -c "import json;print(json.load(open('capacitor.config.json'))['appId'])")
+          APP_NAME=$(python -c "import json;print(json.load(open('capacitor.config.json'))['appName'])")
+          echo "bundle_id=$BUNDLE_ID" >> $GITHUB_OUTPUT
+          echo "app_name=$APP_NAME" >> $GITHUB_OUTPUT
+          echo "Built variant='${{ matrix.variant }}' bundle=$BUNDLE_ID name=$APP_NAME"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: variant-${{ matrix.variant }}
+          path: ios/App/variant-${{ matrix.variant }}.ipa
+          retention-days: 30
