@@ -42,7 +42,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Pillow
+      - name: Install Python deps
         run: pip install -r scripts/requirements.txt
 
       - name: Install deps
@@ -53,6 +53,12 @@ jobs:
 
       - name: Capacitor sync
         run: npx cap sync ios
+
+      - name: Inject LiveActivity extension target into pbxproj
+        # Idempotent — inserts PBXNativeTarget + build phases + Info.plist ref
+        # for LiveActivityWidget. Must run AFTER `cap sync ios` because cap
+        # sync sometimes rewrites parts of pbxproj.
+        run: python scripts/add_live_activity_target.py
 
       - name: Resolve Swift Package deps
         working-directory: ios/App
@@ -78,6 +84,8 @@ jobs:
         run: |
           mkdir -p Payload
           cp -R build/App.xcarchive/Products/Applications/App.app Payload/
+          # Sanity: confirm the widget extension made it into the .app
+          ls -R Payload/App.app/PlugIns 2>/dev/null || echo "WARN: no PlugIns dir in App.app"
           zip -qr "variant-${{ matrix.variant }}.ipa" Payload
           ls -lh "variant-${{ matrix.variant }}.ipa"
 

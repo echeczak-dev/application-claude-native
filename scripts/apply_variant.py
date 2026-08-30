@@ -72,17 +72,42 @@ def patch_info_plist(app_name: str) -> None:
 
 
 def patch_pbxproj(bundle_id: str) -> None:
+    """Rewrite the main App target's PRODUCT_BUNDLE_IDENTIFIER + keep any
+    extension targets in the form `<new_app_bundle>.<ExtName>`.
+
+    Prior naive re.subn replaced ALL occurrences with the same id — that
+    breaks Widget Extensions because they must have a distinct bundle id.
+    We now detect which lines are the "app bundle" (bases matching the
+    known BASE_BUNDLE prefix, no dotted extension name) vs "ext bundle"
+    (has a suffix that looks like an extension target name like
+    'LiveActivityWidget') and rewrite each accordingly."""
     path = REPO / "ios" / "App" / "App.xcodeproj" / "project.pbxproj"
     text = path.read_text(encoding="utf-8")
+
+    # Known extension target suffixes — kept explicit so we don't accidentally
+    # try to treat a legit dotted app bundle id as an extension.
+    EXT_SUFFIXES = {"LiveActivityWidget"}
+
+    def repl(m: re.Match) -> str:
+        old = m.group(1).strip()
+        # Trailing part after the last dot — check if it's a known ext name.
+        parts = old.rsplit(".", 1)
+        if len(parts) == 2 and parts[1] in EXT_SUFFIXES:
+            new = f"{bundle_id}.{parts[1]}"
+        else:
+            new = bundle_id
+        return f"PRODUCT_BUNDLE_IDENTIFIER = {new};"
+
     new_text, n = re.subn(
-        r"PRODUCT_BUNDLE_IDENTIFIER = [^;]+;",
-        f"PRODUCT_BUNDLE_IDENTIFIER = {bundle_id};",
+        r"PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);",
+        repl,
         text,
     )
     if n == 0:
         raise SystemExit("no PRODUCT_BUNDLE_IDENTIFIER lines found in pbxproj")
     path.write_text(new_text, encoding="utf-8")
-    print(f"  [ok] project.pbxproj -> PRODUCT_BUNDLE_IDENTIFIER replaced ({n}× -> {bundle_id})")
+    print(f"  [ok] project.pbxproj -> PRODUCT_BUNDLE_IDENTIFIER rewritten "
+          f"({n}× app={bundle_id}, extensions preserved)")
 
 
 IMAGE_BLOCK_RE = re.compile(

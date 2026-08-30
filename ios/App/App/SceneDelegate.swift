@@ -15,6 +15,13 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+        // Live Activity URL scheme takes priority — handle `applicationclaude://la/*`
+        // ourselves and only forward to Capacitor if we didn't consume it.
+        if #available(iOS 16.2, *) {
+            for ctx in URLContexts {
+                if LiveActivityRouter.shared.handle(url: ctx.url) { return }
+            }
+        }
         SceneDelegateProxy.shared.scene(scene, openURLContexts: URLContexts)
     }
 

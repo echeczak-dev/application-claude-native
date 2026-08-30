@@ -7,7 +7,23 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        // Live Activity boot-time trigger — the dashboard on Windows launches
+        // us via `pymobiledevice3 core-device launch-application <bundle>
+        // --la=applicationclaude://la/start?...`. UIKit doesn't auto-route
+        // custom scheme URLs passed as launch arguments, so we scan argv here
+        // and hand the URL to the router. Also covers `launchOptions[.url]`
+        // for the plain scheme-open path (Safari, QR scans, iOS Shortcuts).
+        if #available(iOS 16.2, *) {
+            for arg in CommandLine.arguments where arg.hasPrefix("--la=") {
+                let raw = String(arg.dropFirst(5))
+                if let url = URL(string: raw) {
+                    LiveActivityRouter.shared.handle(url: url)
+                }
+            }
+            if let url = launchOptions?[.url] as? URL {
+                _ = LiveActivityRouter.shared.handle(url: url)
+            }
+        }
         return true
     }
 
