@@ -187,6 +187,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				01EE73C5379382FB73830F6A /* LiveActivityWidget */,
 				504EC3031FED79650016851F /* App */,
 			);
 		};

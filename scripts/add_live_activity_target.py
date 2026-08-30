@@ -321,8 +321,13 @@ def _create_section(text: str, section: str, snippet: str) -> str:
 
 def apply_all_mutations(text: str) -> str:
     if EXT_NAME in text and IDS["target"] in text:
-        print(f"[skip] {EXT_NAME} target already present in pbxproj")
-        return _ensure_deployment_bump(text)
+        print(f"[skip-most] {EXT_NAME} target already present — running only "
+              f"idempotent post-checks (register in project.targets, bump deployment)")
+        # Even if target exists, still ensure it's registered in PBXProject.targets
+        # and deployment bump is applied (they have their own idempotency).
+        text = _register_target_in_project(text, find_project_uuid(text))
+        text = _ensure_deployment_bump(text)
+        return text
 
     project_uuid = find_project_uuid(text)
     main_uuid    = find_main_target_uuid(text)
@@ -432,9 +437,22 @@ def _add_target_dependency_to_app(text: str, main_uuid: str) -> str:
 
 
 def _register_target_in_project(text: str, project_uuid: str) -> str:
+    """Insert the widget target UUID into PBXProject.targets. The naive
+    `[^}]+?` regex fails because the Project block has nested `{}` in
+    its `attributes = { TargetAttributes = { … } }` sub-dict — the lazy
+    match stops at the first closing brace inside `attributes`. Since
+    there's exactly ONE `targets = (` in the whole pbxproj (the PBXProject's),
+    we just target that unique marker without needing to match the enclosing
+    block. Idempotent — no-op if the widget UUID is already listed."""
     target_line = f"				{IDS['target']} /* {EXT_NAME} */,\n"
-    pattern = rf"({project_uuid} /\* Project object \*/ = \{{[^}}]+?targets = \(\s*\n)"
-    return re.sub(pattern, r"\1" + target_line, text, count=1, flags=re.DOTALL)
+    # If already present, don't duplicate.
+    if IDS['target'] in text.split("targets = (", 1)[1].split(");", 1)[0]:
+        return text
+    return re.sub(
+        r"(targets = \(\s*\n)",
+        r"\1" + target_line,
+        text, count=1,
+    )
 
 
 def _ensure_deployment_bump(text: str) -> str:
