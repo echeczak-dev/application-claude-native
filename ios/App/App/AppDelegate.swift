@@ -7,13 +7,28 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Live Activity boot-time trigger — the dashboard on Windows launches
-        // us via `pymobiledevice3 core-device launch-application <bundle>
-        // --la=applicationclaude://la/start?...`. UIKit doesn't auto-route
-        // custom scheme URLs passed as launch arguments, so we scan argv here
-        // and hand the URL to the router. Also covers `launchOptions[.url]`
-        // for the plain scheme-open path (Safari, QR scans, iOS Shortcuts).
+        // Live Activity boot-time trigger — 3 possible sources, tried in order:
+        //  1. Documents/la_pending.txt — file dropped by the Windows dashboard
+        //     via `pymobiledevice3 apps push`. This is the primary channel:
+        //     iOS strips custom argv/env from user-launched apps on iOS 17+
+        //     so the file trick is the only reliable local push.
+        //  2. Env var LA_URL / argv --la= — legacy fallback for testing.
+        //  3. launchOptions[.url] — covers Safari / Notes tap / Shortcut.
         if #available(iOS 16.2, *) {
+            if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                let pending = docs.appendingPathComponent("la_pending.txt")
+                if FileManager.default.fileExists(atPath: pending.path),
+                   let raw = try? String(contentsOf: pending, encoding: .utf8),
+                   let url = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                    LiveActivityRouter.shared.handle(url: url)
+                    // Consume the pending file so we don't re-fire on next launch
+                    try? FileManager.default.removeItem(at: pending)
+                }
+            }
+            if let envURL = ProcessInfo.processInfo.environment["LA_URL"],
+               let url = URL(string: envURL) {
+                LiveActivityRouter.shared.handle(url: url)
+            }
             for arg in CommandLine.arguments where arg.hasPrefix("--la=") {
                 let raw = String(arg.dropFirst(5))
                 if let url = URL(string: raw) {
