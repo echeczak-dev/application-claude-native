@@ -44,6 +44,15 @@ def load_variant(path: Path) -> dict:
     modes = [k for k in ("image_url", "image_data_url", "config_url") if data.get(k)]
     if len(modes) != 1:
         raise SystemExit(f"variant must have exactly one of image_url|image_data_url|config_url (got: {modes})")
+    # Optional alt images — if present, a secret 3-second long-press on the
+    # top-right 80x80 corner of the app CYCLES through them (primary → alt →
+    # alt2 → primary). Choice is persisted in localStorage.imgIdx.
+    # Slot 1 keys: image_url_alt   / image_data_url_alt
+    # Slot 2 keys: image_url_alt2  / image_data_url_alt2
+    for suf in ("", "2"):
+        slot_present = [k for k in (f"image_url_alt{suf}", f"image_data_url_alt{suf}") if data.get(k)]
+        if len(slot_present) > 1:
+            raise SystemExit(f"at most one source for alt{suf} (got: {slot_present})")
     return data
 
 
@@ -116,46 +125,139 @@ IMAGE_BLOCK_RE = re.compile(
 )
 
 
+def _resolve_image_literal_for_slot(variant: dict, slot: int) -> str | None:
+    """Return a JS string literal for the given image slot (0/1/2), or None
+    if that slot is not configured. Slot 0 = primary. Slots 1/2 = alt/alt2.
+    Both data-URL and remote-URL become string literals."""
+    if slot == 0:
+        keys = ("image_data_url", "image_url")
+    elif slot == 1:
+        keys = ("image_data_url_alt", "image_url_alt")
+    else:
+        keys = ("image_data_url_alt2", "image_url_alt2")
+    for k in keys:
+        if variant.get(k):
+            return json.dumps(variant[k])
+    return None
+
+
 def build_image_block(variant: dict) -> str:
-    """Return the JS snippet that decides how #img is populated."""
-    if variant.get("image_data_url"):
-        # Bake the data URL as a literal — no network call, no polling.
-        data_url_js = json.dumps(variant["image_data_url"])
+    """Return the JS snippet that decides how #img is populated.
+
+    Behaviour:
+      - Renders images[0] on load (or the last-chosen index from localStorage).
+      - If more than one image is configured, registers a secret gesture:
+        3-second long-press on the top-right 80x80 corner CYCLES through
+        them (0 → 1 → 2 → 0). A tiny green dot fades in at 2.5s to hint,
+        then flashes brighter at 3s when the swap fires.
+      - Choice persists in localStorage.imgIdx across relaunches.
+      - The dynamic config_url mode is preserved but doesn't participate
+        in cycling (it just polls the remote endpoint every 5s)."""
+    slots = [_resolve_image_literal_for_slot(variant, i) for i in range(3)]
+    slots = [s for s in slots if s]   # keep configured slots only
+
+    if variant.get("config_url"):
+        # Dynamic polling mode — no toggle available.
+        cfg_js = json.dumps(variant["config_url"])
         return (
             "/* VARIANT:IMAGE:START */\n"
-            f"  imgEl.src = {data_url_js};\n"
+            f"  var CONFIG_URL = {cfg_js};\n"
+            "  var lastSrc = null;\n"
+            "  async function refresh() {\n"
+            "    try {\n"
+            "      var r = await fetch(CONFIG_URL + '?t=' + Date.now(), {cache:'no-store'});\n"
+            "      if (!r.ok) return;\n"
+            "      var cfg = await r.json();\n"
+            "      var url = (cfg.image_url || '').trim();\n"
+            "      if (!url) return;\n"
+            f"      if (!/^(https?:|data:)/.test(url)) url = new URL(url, {cfg_js}).href;\n"
+            "      if (url !== lastSrc) { imgEl.src = url; lastSrc = url; }\n"
+            "    } catch (_) {}\n"
+            "  }\n"
+            "  refresh();\n"
+            "  setInterval(refresh, 5000);\n"
             "  /* VARIANT:IMAGE:END */"
         )
-    if variant.get("image_url"):
-        # Static remote URL — fetched once at load, no polling.
-        url_js = json.dumps(variant["image_url"])
-        return (
-            "/* VARIANT:IMAGE:START */\n"
-            f"  imgEl.src = {url_js};\n"
-            "  /* VARIANT:IMAGE:END */"
-        )
-    # Fallback: dynamic polling from a config endpoint.
-    cfg_url = variant["config_url"]
-    cfg_js = json.dumps(cfg_url)
-    return (
-        "/* VARIANT:IMAGE:START */\n"
-        f"  var CONFIG_URL = {cfg_js};\n"
-        "  var lastSrc = null;\n"
-        "  async function refresh() {\n"
-        "    try {\n"
-        "      var r = await fetch(CONFIG_URL + '?t=' + Date.now(), {cache:'no-store'});\n"
-        "      if (!r.ok) return;\n"
-        "      var cfg = await r.json();\n"
-        "      var url = (cfg.image_url || '').trim();\n"
-        "      if (!url) return;\n"
-        f"      if (!/^(https?:|data:)/.test(url)) url = new URL(url, {cfg_js}).href;\n"
-        "      if (url !== lastSrc) { imgEl.src = url; lastSrc = url; }\n"
-        "    } catch (_) {}\n"
-        "  }\n"
-        "  refresh();\n"
-        "  setInterval(refresh, 5000);\n"
-        "  /* VARIANT:IMAGE:END */"
-    )
+
+    # Static mode: bake 1..3 images + optional secret-gesture cycle.
+    lines = ["/* VARIANT:IMAGE:START */"]
+    lines.append(f"  var IMAGES = [{', '.join(slots)}];")
+    if len(slots) >= 2:
+        lines.append(_cycle_js_snippet())
+    else:
+        # Single image — no cycle attached.
+        lines.append("  imgEl.src = IMAGES[0];")
+    lines.append("  /* VARIANT:IMAGE:END */")
+    return "\n".join(lines)
+
+
+def _cycle_js_snippet() -> str:
+    """The gesture handler. Kept as a Python string so it's inlined into
+    the built www/index.html and never fetched. Zero network dependency.
+
+    Cycles through IMAGES[] on every successful 3-sec long-press in the
+    top-right 80x80 corner. Persists chosen index in localStorage.imgIdx."""
+    return """  function _laImgIdx() {
+    var v = parseInt(localStorage.getItem('imgIdx') || '0', 10);
+    if (isNaN(v) || v < 0 || v >= IMAGES.length) v = 0;
+    return v;
+  }
+  function _laApplyImg() { imgEl.src = IMAGES[_laImgIdx()]; }
+  _laApplyImg();
+
+  // Secret gesture: 3-second continuous press in the top-right 80x80 zone.
+  // Finger moving out of the zone cancels. A tiny green dot fades in at
+  // 2.5s so you know success is imminent; at 3s it flashes brighter and
+  // cycles to the next image (with wrap-around).
+  (function _laSecretCycle(){
+    var HOTZONE = 80;
+    var HOLD_MS = 3000;
+    var HINT_MS = 2500;
+    var pd = null;
+    var timerFire = null;
+    var timerHint = null;
+    var dot = null;
+    function inZone(e) {
+      return e.clientX >= (window.innerWidth - HOTZONE) && e.clientY <= HOTZONE;
+    }
+    function cleanup() {
+      if (timerFire) { clearTimeout(timerFire); timerFire = null; }
+      if (timerHint) { clearTimeout(timerHint); timerHint = null; }
+      if (dot) { dot.remove(); dot = null; }
+      pd = null;
+    }
+    function showHint() {
+      dot = document.createElement('div');
+      dot.style.cssText = 'position:fixed;top:14px;right:14px;width:8px;height:8px;'
+        + 'border-radius:50%;background:#4ade80;opacity:0.35;'
+        + 'transition:opacity 300ms ease,transform 400ms ease;'
+        + 'z-index:2147483647;pointer-events:none';
+      document.body.appendChild(dot);
+    }
+    function fire() {
+      if (dot) {
+        dot.style.opacity = '1';
+        dot.style.transform = 'scale(1.8)';
+        dot.style.boxShadow = '0 0 14px #4ade80';
+      }
+      var next = (_laImgIdx() + 1) % IMAGES.length;
+      localStorage.setItem('imgIdx', String(next));
+      _laApplyImg();
+      setTimeout(cleanup, 320);
+    }
+    document.addEventListener('pointerdown', function(e){
+      if (!inZone(e)) return;
+      pd = {x: e.clientX, y: e.clientY};
+      timerHint = setTimeout(showHint, HINT_MS);
+      timerFire = setTimeout(fire, HOLD_MS);
+    }, {passive: true});
+    document.addEventListener('pointermove', function(e){
+      if (!pd) return;
+      if (Math.abs(e.clientX - pd.x) > 30 || Math.abs(e.clientY - pd.y) > 30) cleanup();
+    }, {passive: true});
+    document.addEventListener('pointerup', cleanup, {passive: true});
+    document.addEventListener('pointercancel', cleanup, {passive: true});
+  })();"""
 
 
 def patch_www_index(variant: dict) -> None:
