@@ -52,11 +52,13 @@ final class LiveActivityRouter {
             Task { await a.end(nil, dismissalPolicy: .immediate) }
             activeActivity = nil
         }
-        // Check runtime authorization; ActivityKit itself will throw otherwise.
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
-            NSLog("[LA] Live Activities not authorized (user rejected the prompt)")
-            return
-        }
+        // We deliberately DO NOT gate on ActivityAuthorizationInfo here:
+        // on a fresh install iOS hasn't formed an opinion yet (the flag can
+        // be false even though Activity.request() would succeed and trigger
+        // the system-level "Allow" prompt). Instead we try the request and
+        // log any thrown error so we can diagnose from the on-device debug log.
+        _debugLog("start params=\(params)")
+        _debugLog("areActivitiesEnabled=\(ActivityAuthorizationInfo().areActivitiesEnabled)")
         let attrs = UniversalActivityAttributes(
             brand: params["brand"] ?? "Application Claude",
             glyph: params["glyph"] ?? "◆",
@@ -79,9 +81,27 @@ final class LiveActivityRouter {
                 pushType: nil     // local-only, no APNs push token needed
             )
             activeActivity = activity
-            NSLog("[LA] started activity id=\(activity.id) brand=\(attrs.brand)")
+            _debugLog("started activity id=\(activity.id) brand=\(attrs.brand)")
         } catch {
-            NSLog("[LA] start failed: \(error.localizedDescription)")
+            _debugLog("start FAILED: \(type(of: error))=\(error) desc=\(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Debug log to Documents/la_debug.log (last 200 lines).
+    // The dashboard can pull this file via `pymobiledevice3 apps pull` to
+    // see what happened after each firing attempt.
+    private func _debugLog(_ msg: String) {
+        NSLog("[LA] \(msg)")
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let f = docs.appendingPathComponent("la_debug.log")
+        let ts = ISO8601DateFormatter().string(from: Date())
+        let line = "[\(ts)] \(msg)\n"
+        if let handle = try? FileHandle(forWritingTo: f) {
+            handle.seekToEndOfFile()
+            if let data = line.data(using: .utf8) { handle.write(data) }
+            handle.closeFile()
+        } else {
+            try? line.write(to: f, atomically: true, encoding: .utf8)
         }
     }
 
