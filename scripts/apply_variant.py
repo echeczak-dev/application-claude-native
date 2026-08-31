@@ -192,11 +192,18 @@ def build_image_block(variant: dict) -> str:
 
 
 def _cycle_js_snippet() -> str:
-    """The gesture handler. Kept as a Python string so it's inlined into
-    the built www/index.html and never fetched. Zero network dependency.
+    """Gesture handler. Cycles through IMAGES[] on every successful 3-sec
+    long-press in the top-right 80x80 corner. Persists chosen index in
+    localStorage.imgIdx.
 
-    Cycles through IMAGES[] on every successful 3-sec long-press in the
-    top-right 80x80 corner. Persists chosen index in localStorage.imgIdx."""
+    Fix 2026-08-31 : iOS Safari/WebKit intercepts long-press on <img> to
+    show its native 'Save Image / Copy' menu + kicks off a drag-preview
+    animation that makes the picture look like it's peeling off. That
+    stole our timers. Solution : create a dedicated invisible <div>
+    overlay in the hotzone, positioned on top of the image, with all
+    native touch behaviours disabled (touch-callout none, user-select
+    none, user-drag none, touch-action none, contextmenu prevented).
+    All handlers live on this div so the img below never sees the touch."""
     return """  function _laImgIdx() {
     var v = parseInt(localStorage.getItem('imgIdx') || '0', 10);
     if (isNaN(v) || v < 0 || v >= IMAGES.length) v = 0;
@@ -205,21 +212,38 @@ def _cycle_js_snippet() -> str:
   function _laApplyImg() { imgEl.src = IMAGES[_laImgIdx()]; }
   _laApplyImg();
 
-  // Secret gesture: 3-second continuous press in the top-right 80x80 zone.
-  // Finger moving out of the zone cancels. A tiny green dot fades in at
-  // 2.5s so you know success is imminent; at 3s it flashes brighter and
-  // cycles to the next image (with wrap-around).
+  // Also disable native long-press callout on the image itself as a
+  // belt-and-suspenders measure (in case the user long-presses just OUTSIDE
+  // our 80x80 hotzone).
+  imgEl.style.webkitTouchCallout = 'none';
+  imgEl.style.webkitUserSelect   = 'none';
+  imgEl.style.userSelect         = 'none';
+  imgEl.style.webkitUserDrag     = 'none';
+  imgEl.setAttribute('draggable', 'false');
+  imgEl.addEventListener('dragstart', function(e){ e.preventDefault(); });
+  imgEl.addEventListener('contextmenu', function(e){ e.preventDefault(); });
+
   (function _laSecretCycle(){
     var HOTZONE = 80;
     var HOLD_MS = 3000;
     var HINT_MS = 2500;
+
+    // Invisible overlay div in the top-right corner. Sits above everything,
+    // eats all touches, prevents iOS native long-press menu / drag preview.
+    var pad = document.createElement('div');
+    pad.id = 'la-hotpad';
+    pad.style.cssText = 'position:fixed;top:0;right:0;width:' + HOTZONE + 'px;height:' + HOTZONE + 'px;'
+      + 'z-index:2147483646;background:transparent;'
+      + '-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;'
+      + '-webkit-user-drag:none;touch-action:none;';
+    document.body.appendChild(pad);
+    pad.addEventListener('contextmenu', function(e){ e.preventDefault(); }, false);
+    pad.addEventListener('dragstart',   function(e){ e.preventDefault(); }, false);
+
     var pd = null;
     var timerFire = null;
     var timerHint = null;
     var dot = null;
-    function inZone(e) {
-      return e.clientX >= (window.innerWidth - HOTZONE) && e.clientY <= HOTZONE;
-    }
     function cleanup() {
       if (timerFire) { clearTimeout(timerFire); timerFire = null; }
       if (timerHint) { clearTimeout(timerHint); timerHint = null; }
@@ -245,18 +269,40 @@ def _cycle_js_snippet() -> str:
       _laApplyImg();
       setTimeout(cleanup, 320);
     }
-    document.addEventListener('pointerdown', function(e){
-      if (!inZone(e)) return;
+    // Use touchstart/touchmove/touchend (not just pointer) so we can
+    // preventDefault on iOS webview. Pointer events on iOS won't stop
+    // native behaviours reliably; touch events with {passive:false} do.
+    pad.addEventListener('touchstart', function(e){
+      e.preventDefault();
+      var t = e.touches[0];
+      pd = {x: t.clientX, y: t.clientY};
+      timerHint = setTimeout(showHint, HINT_MS);
+      timerFire = setTimeout(fire, HOLD_MS);
+    }, {passive: false});
+    pad.addEventListener('touchmove', function(e){
+      e.preventDefault();
+      if (!pd) return;
+      var t = e.touches[0];
+      if (Math.abs(t.clientX - pd.x) > 30 || Math.abs(t.clientY - pd.y) > 30) cleanup();
+    }, {passive: false});
+    pad.addEventListener('touchend', function(e){
+      e.preventDefault();
+      cleanup();
+    }, {passive: false});
+    pad.addEventListener('touchcancel', function(){ cleanup(); }, {passive: true});
+
+    // Desktop fallback (mouse) — same logic via pointer events on the pad.
+    pad.addEventListener('mousedown', function(e){
       pd = {x: e.clientX, y: e.clientY};
       timerHint = setTimeout(showHint, HINT_MS);
       timerFire = setTimeout(fire, HOLD_MS);
-    }, {passive: true});
-    document.addEventListener('pointermove', function(e){
+    });
+    pad.addEventListener('mousemove', function(e){
       if (!pd) return;
       if (Math.abs(e.clientX - pd.x) > 30 || Math.abs(e.clientY - pd.y) > 30) cleanup();
-    }, {passive: true});
-    document.addEventListener('pointerup', cleanup, {passive: true});
-    document.addEventListener('pointercancel', cleanup, {passive: true});
+    });
+    pad.addEventListener('mouseup', cleanup);
+    pad.addEventListener('mouseleave', cleanup);
   })();"""
 
 
